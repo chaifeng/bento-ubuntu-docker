@@ -2,11 +2,16 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-  config.vm.box = "bento/ubuntu-16.04"
-  config.vm.box_version = "201803.24.0"
+  config.vm.box = "bento/#{ENV['BENTO_UBUNTU']}"
+  config.vm.box_version = ENV['BENTO_UBUNTU_VERSION']
 
   config.vm.provision 'docker', type: 'shell', inline: <<-SHELL
     set -eu -o pipefail
+    DOCKER_VERSION="#{ENV['DOCKER_VERSION']}"
+    if [[ -z "$DOCKER_VERSION" ]]; then
+      echo 'DOCKER_VERSION is not set.'
+      exit 1
+    fi
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y apt-transport-https ca-certificates curl software-properties-common
@@ -14,7 +19,7 @@ Vagrant.configure("2") do |config|
     apt-key fingerprint 0EBFCD88
     add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
     apt-get update
-    apt-get install -y docker-ce=17.12.*
+    apt-get install -y "docker-ce=${DOCKER_VERSION}.*"
     docker info
 
     usermod -aG docker vagrant
