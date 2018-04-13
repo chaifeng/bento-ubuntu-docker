@@ -14,6 +14,10 @@ DOCKER="docker-$DOCKER_VERSION"
 BOXNAME="${BENTO_UBUNTU}-${DOCKER}"
 BOXFILE="${VAGRANT_CLOUD_USER}-bento-${BENTO_UBUNTU}-docker-${DOCKER_VERSION}.box"
 
+GITREPO="$(git remote get-url origin)"
+GITREPO="${GITREPO#git@github.com:}"
+GITREPO="${GITREPO%.git}"
+
 if [[ ! -f "$BOXFILE" ]]; then
   echo "Create ${BOXNAME}"
   vagrant destroy --force
@@ -35,7 +39,7 @@ curl \
               , \"name\": \"${BOXNAME}\" \
               , \"is_private\": false \
               , \"short_description\": \
-                   \"Ubuntu ${BENTO_UBUNTU#ubuntu-} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_UBUNTU}\" \
+                   \"Ubuntu ${BENTO_UBUNTU#ubuntu-} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_UBUNTU}. Repo: https://github.com/${GITREPO}\" \
               } \
           }"
 
@@ -45,7 +49,7 @@ curl \
     --header "Content-Type: application/json" \
     --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
     "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/versions" \
-    --data "{ \"version\": { \"version\": \"201803.24.0\" } }"
+    --data "{ \"version\": { \"version\": \"201803.24.0\", \"description\": \"Repo: [${GITREPO}](https://github.com/${GITREPO})\" } }"
 
 echo ""
 echo "Create a new provider"
