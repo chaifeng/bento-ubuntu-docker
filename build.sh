@@ -26,6 +26,14 @@ if [[ ! -f "$BOXFILE" ]]; then
   vagrant package --output "$BOXFILE"
 else
   echo "Box '${BOXNAME} is already created.'"
+  download_url="$(curl \
+      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+      "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/${BENTO_UBUNTU_VERSION}" \
+  | jq -r ".providers[0].download_url")"
+  if curl -LI --fail "${download_url}"; then
+      echo "$BOXNAME is alread uploaded."
+      exit 0
+  fi
 fi
 
 echo ""
