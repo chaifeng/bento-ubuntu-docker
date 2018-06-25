@@ -20,6 +20,7 @@ Vagrant.configure("2") do |config|
     add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
     apt-get update
     apt-get install -y "docker-ce=${DOCKER_VERSION}.*"
+    unset http_proxy https_proxy no_proxy
     docker info
 
     usermod -aG docker vagrant

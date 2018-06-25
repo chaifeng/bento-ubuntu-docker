@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 set -eu -o pipefail
 
+if [[ "$-" = *x* ]]; then
+  exec 99>>"${BASH_SOURCE%%.sh}.log"
+  BASH_XTRACEFD=99
+fi
+
 VAGRANT_CLOUD_USER="${VAGRANT_CLOUD_USER:-chaifeng}"
 VAGRANT_VAGRANTFILE="Vagrantfile-bento"
 
 DOCKER_VERSION="${DOCKER_VERSION:-18.03}"
 BENTO_UBUNTU="${BENTO_UBUNTU:-ubuntu-16.04}"
-BENTO_UBUNTU_VERSION="${BENTO_UBUNTU_VERSION:-201803.24.0}"
+BENTO_UBUNTU_VERSION="${BENTO_UBUNTU_VERSION:-201806.08.0}"
+
+VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
 
 export DOCKER_VERSION BENTO_UBUNTU_VERSION BENTO_UBUNTU VAGRANT_VAGRANTFILE
 
 DOCKER="docker-$DOCKER_VERSION"
 BOXNAME="${BENTO_UBUNTU}-${DOCKER}"
-BOXFILE="${VAGRANT_CLOUD_USER}-bento-${BENTO_UBUNTU}-docker-${DOCKER_VERSION}-v${BENTO_UBUNTU_VERSION}.box"
+BOXFILE="${VAGRANT_CLOUD_USER}-bento-${BENTO_UBUNTU}-docker-${DOCKER_VERSION}-v${BENTO_UBUNTU_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
 
 GITREPO="$(git remote get-url origin)"
 GITREPO="${GITREPO#git@github.com:}"
@@ -21,19 +28,15 @@ GITREPO="${GITREPO%.git}"
 if [[ ! -f "$BOXFILE" ]]; then
   echo "Create ${BOXNAME}"
   vagrant destroy --force
-  vagrant up
+  vagrant up --provider="$VAGRANT_DEFAULT_PROVIDER"
   vagrant halt
+  if [[ "$VAGRANT_DEFAULT_PROVIDER" = vmware_* ]]; then
+      VMDK_FILE="$(ls -1 .vagrant/machines/default/"${VAGRANT_DEFAULT_PROVIDER}"/*/disk-cl1.vmdk | head -1)"
+      vmware-vdiskmanager -k "$VMDK_FILE"
+  fi
   vagrant package --output "$BOXFILE"
 else
   echo "Box '${BOXNAME} is already created.'"
-  download_url="$(curl \
-      --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-      "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/${BENTO_UBUNTU_VERSION}" \
-  | jq -r ".providers[0].download_url")"
-  if curl -LI --fail "${download_url}"; then
-      echo "$BOXNAME is alread uploaded."
-      exit 0
-  fi
 fi
 
 echo ""
@@ -57,7 +60,7 @@ curl \
     --header "Content-Type: application/json" \
     --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
     "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/versions" \
-    --data "{ \"version\": { \"version\": \"201803.24.0\", \"description\": \"Repo: [${GITREPO}](https://github.com/${GITREPO})\" } }"
+    --data "{ \"version\": { \"version\": \"$BENTO_UBUNTU_VERSION\", \"description\": \"Repo: [${GITREPO}](https://github.com/${GITREPO})\" } }"
 
 echo ""
 echo "Create a new provider"
@@ -65,19 +68,34 @@ curl \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
   "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/$BENTO_UBUNTU_VERSION/providers" \
-  --data "{ \"provider\": { \"name\": \"virtualbox\" } }"
+  --data "{ \"provider\": { \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\" } }"
+
+echo ""
+echo "Check if it is already uploaded"
+download_url="$(curl \
+  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/${BENTO_UBUNTU_VERSION}" \
+  | jq -r ".providers[] | if .name == \"${VAGRANT_DEFAULT_PROVIDER}\" then .download_url else empty end")"
+if curl -LI --fail "${download_url}"; then
+  echo "$BOXNAME is already uploaded."
+  exit 0
+fi
 
 echo ""
 echo "Prepare the provider for upload/get an upload URL"
 response="$(curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/$BENTO_UBUNTU_VERSION/provider/virtualbox/upload")"
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${BOXNAME}/version/$BENTO_UBUNTU_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/upload")"
 
 echo "Extract the upload URL from the response"
 upload_path="$(echo "$response" | jq -r .upload_path)"
 
 echo "Perform the upload"
-curl "$upload_path" --request PUT --upload-file "$BOXFILE"
+if type pv; then
+  pv "$BOXFILE" | curl "$upload_path" --request PUT --upload-file - --silent
+else
+  curl "$upload_path" --request PUT --upload-file "$BOXFILE" --progress-bar
+fi
 
 echo "Release the version"
 curl \
