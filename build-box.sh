@@ -25,18 +25,37 @@ GITREPO="$(git remote get-url origin)"
 GITREPO="${GITREPO#git@github.com:}"
 GITREPO="${GITREPO%.git}"
 
+
+if [[ "$VAGRANT_DEFAULT_PROVIDER" = vmware_* ]]; then
+  VMWARE_PROVIDER=true
+else
+  VMWARE_PROVIDER=false
+fi
+
 if [[ ! -f "$BOXFILE" ]]; then
   echo "Create ${BOXNAME}"
   vagrant destroy --force
   vagrant up --provider="$VAGRANT_DEFAULT_PROVIDER"
   vagrant halt
-  if [[ "$VAGRANT_DEFAULT_PROVIDER" = vmware_* ]]; then
-      VMDK_FILE="$(ls -1 .vagrant/machines/default/"${VAGRANT_DEFAULT_PROVIDER}"/*/disk-cl1.vmdk | head -1)"
+  if "$VMWARE_PROVIDER"; then
+      VMDK_FILE="$(find .vagrant/machines/default/"${VAGRANT_DEFAULT_PROVIDER}"/ -name disk-cl1.vmdk | head -1)"
       vmware-vdiskmanager -k "$VMDK_FILE"
   fi
+
   vagrant package --output "$BOXFILE"
+
+  METADATA_FILE=./metadata.json
+  if "$VMWARE_PROVIDER" && ! tar -zxOf "$BOXFILE" "$METADATA_FILE" | grep -F "$VAGRANT_DEFAULT_PROVIDER" &>/dev/null; then
+    mv "$BOXFILE" "$BOXFILE".gz
+    gunzip "$BOXFILE".gz
+    echo '{"provider":"vmware_fusion"}' > "$METADATA_FILE"
+    tar -uf "$BOXFILE" "$METADATA_FILE"
+    rm "$METADATA_FILE"
+    gzip "$BOXFILE"
+    mv "$BOXFILE".gz "$BOXFILE"
+  fi
 else
-  echo "Box '${BOXNAME} is already created.'"
+  echo "Box ${BOXNAME} v$BENTO_UBUNTU_VERSION is already created."
 fi
 
 echo ""
