@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -xe
 
-export BENTO_UBUNTU_VERSION=201806.08.0
+export BENTO_UBUNTU_VERSION=201808.24.0
 export VAGRANT_DEFAULT_PROVIDER=virtualbox
 
 BENTO_UBUNTU=ubuntu-18.04 DOCKER_VERSION=18.06 bash -x ./build-box.sh
