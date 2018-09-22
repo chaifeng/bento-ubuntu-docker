@@ -31,6 +31,22 @@ First, we need to generate an authentication token at https://app.vagrantup.com/
     
 访问 https://app.vagrantup.com/chaifeng/ 这里查看更多的镜像
 
+另外，可能需要参考官方的 [Docker 镜像加速](https://www.docker-cn.com/registry-mirror) 文档来加速国内的下载速度。
+
+或者在 `Vagrantfile` 里面添加下面的代码
+
+    config.vm.provision 'docker-cn', type: 'shell', inline: <<-SHELL
+      [[ -f /etc/docker/daemon.json ]] && exit 0
+      
+      echo '{ "registry-mirrors": ["https://registry.docker-cn.com"] }' > /etc/docker/daemon.json
+      
+      if type systemctl &>/dev/null; then
+        systemctl restart docker
+      else
+        service docker restart
+      fi
+    SHELL
+  
 ## 构建自己的镜像
 
 首先，我们需要在 https://app.vagrantup.com/settings/security 这里生成一个令牌。
