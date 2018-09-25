@@ -10,6 +10,15 @@ Visit https://app.vagrantup.com/chaifeng/ to find more images.
 
 ## Build
 
+### Dependencies
+
+- [jq](https://stedolan.github.io/jq/)
+- [ivarch.com: Pipe Viewer](https://www.ivarch.com/programs/pv.shtml)
+
+    brew install jq pv
+
+### Build Images
+
 First, we need to generate an authentication token at https://app.vagrantup.com/setting/security
 
     export VAGRANT_CLOUD_TOKEN=your-vagrant-cloud-authentication-token
@@ -48,6 +57,15 @@ First, we need to generate an authentication token at https://app.vagrantup.com/
     SHELL
   
 ## 构建自己的镜像
+
+### 依赖
+
+- [jq](https://stedolan.github.io/jq/)
+- [ivarch.com: Pipe Viewer](https://www.ivarch.com/programs/pv.shtml)
+
+    brew install jq pv
+
+### 构建镜像
 
 首先，我们需要在 https://app.vagrantup.com/settings/security 这里生成一个令牌。
 
