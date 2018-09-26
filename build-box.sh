@@ -46,13 +46,30 @@ if [[ ! -f "$BOXFILE" ]]; then
 
   METADATA_FILE=./metadata.json
   if "$VMWARE_PROVIDER" && ! tar -zxOf "$BOXFILE" "$METADATA_FILE" | grep -F "$VAGRANT_DEFAULT_PROVIDER" &>/dev/null; then
-    mv "$BOXFILE" "$BOXFILE".gz
-    gunzip "$BOXFILE".gz
-    echo '{"provider":"vmware_fusion"}' > "$METADATA_FILE"
-    tar -uf "$BOXFILE" "$METADATA_FILE"
-    rm "$METADATA_FILE"
-    gzip "$BOXFILE"
-    mv "$BOXFILE".gz "$BOXFILE"
+		vmware_image_tmp_folder="$(pwd)/vmware-$(date '+%Y%m%d%H%M%S')"
+		boxfile_repack="$(pwd)/${BOXFILE}-repack"
+
+		declare -a files_to_be_delete=("$vmware_image_tmp_folder" "$boxfile_repack")
+		function on_exit() {
+		  for file in "${files_to_be_delete[@]}"; do
+		    [[ -e "$file" ]] && rm -r "$file"
+		  done
+		}
+		trap on_exit EXIT INT TERM QUIT ABRT ERR
+
+		mkdir "$vmware_image_tmp_folder"
+		pushd "$vmware_image_tmp_folder"
+		tar -zxf ../"$BOXFILE"
+		cat "$METADATA_FILE"
+		echo "Overwrite $METADATA_FILE"
+		cat <<-EOF | tee "$METADATA_FILE"
+		{"provider":"$VAGRANT_DEFAULT_PROVIDER"}
+		EOF
+		tar -zcf "$boxfile_repack" ./*
+		popd
+		rm -r "$vmware_image_tmp_folder"
+		rm "$BOXFILE"
+		mv "$boxfile_repack" "$BOXFILE"
   fi
 else
   echo "Box ${BOXNAME} v$BENTO_UBUNTU_VERSION is already created."
