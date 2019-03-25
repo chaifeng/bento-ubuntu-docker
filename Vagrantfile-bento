@@ -5,8 +5,12 @@ Vagrant.configure("2") do |config|
   config.vm.box = "bento/#{ENV['BENTO_UBUNTU']}"
   config.vm.box_version = ENV['BENTO_UBUNTU_VERSION']
 
+  bento_os_name = ENV['BENTO_UBUNTU'] && ENV['BENTO_UBUNTU'].split('-')[0] || 'ubuntu'
+
   config.vm.provision 'docker', type: 'shell', inline: <<-SHELL
     set -eu -o pipefail
+    release_name=#{bento_os_name}
+    [[ -f /vagrant/proxy.sh ]] && source /vagrant/proxy.sh
     DOCKER_VERSION="#{ENV['DOCKER_VERSION']}"
     if [[ -z "$DOCKER_VERSION" ]]; then
       echo 'DOCKER_VERSION is not set.'
@@ -15,19 +19,20 @@ Vagrant.configure("2") do |config|
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y apt-transport-https ca-certificates curl software-properties-common
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+    curl -fsSL https://download.docker.com/linux/"${release_name}"/gpg | apt-key add -
     apt-key fingerprint 0EBFCD88
-    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
+    add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/"${release_name}" $(lsb_release -cs) stable"
     apt-get update
-    apt-get install -y "docker-ce=${DOCKER_VERSION}.*"
+    apt-get install -y "docker-ce=${DOCKER_VERSION}.*" ||
+      apt-get install -y "docker-ce=5:${DOCKER_VERSION}.*"
     unset http_proxy https_proxy no_proxy
     docker info
 
     usermod -aG docker vagrant
   SHELL
 
-  config.vm.provision 'cleanup', type: 'shell', 
-    path: 'https://github.com/chef/bento/raw/master/ubuntu/scripts/cleanup.sh'
+  config.vm.provision 'cleanup', type: 'shell', # run: "never",
+    path: "https://github.com/chef/bento/raw/master/#{bento_os_name}/scripts/cleanup.sh"
 
   config.vm.provision 'minimize', type: 'shell', 
     path: 'https://github.com/chef/bento/raw/master/_common/minimize.sh',

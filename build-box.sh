@@ -11,7 +11,7 @@ VAGRANT_VAGRANTFILE="Vagrantfile-bento"
 
 DOCKER_VERSION="${DOCKER_VERSION:-18.06}"
 BENTO_UBUNTU="${BENTO_UBUNTU:-ubuntu-18.04}"
-BENTO_UBUNTU_VERSION="${BENTO_UBUNTU_VERSION:-201808.24.0}"
+BENTO_UBUNTU_VERSION="${BENTO_UBUNTU_VERSION:-201812.27.0}"
 
 VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
 
@@ -51,7 +51,7 @@ if [[ ! -f "$boxfile" ]]; then
 		declare -a files_to_be_delete=("$vmware_image_tmp_folder" "$boxfile_repack")
 		function on_exit() {
 		  for file in "${files_to_be_delete[@]}"; do
-		    [[ -e "$file" ]] && rm -r "$file"
+		    [[ ! -e "$file" ]] || rm -r "$file"
 		  done
 		}
 		trap on_exit EXIT INT TERM QUIT ABRT ERR
@@ -73,6 +73,8 @@ if [[ ! -f "$boxfile" ]]; then
 else
   echo "Box ${boxname} v$BENTO_UBUNTU_VERSION is already created."
 fi
+
+[[ -n "${VAGRANT_BENTO_BUILD_ONLY:-}" ]] && exit
 
 echo ""
 echo "Create a new box."
@@ -127,7 +129,7 @@ upload_path="$(echo "$response" | jq -r .upload_path)"
 
 echo "Perform the upload"
 if type pv; then
-  pv "$boxfile" | curl "$upload_path" --request PUT --upload-file - --silent
+  pv "$boxfile" | curl "$upload_path" --request PUT --silent --upload-file -
 else
   curl "$upload_path" --request PUT --upload-file "$boxfile" --progress-bar
 fi
