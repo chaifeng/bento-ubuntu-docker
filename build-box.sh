@@ -10,15 +10,15 @@ VAGRANT_CLOUD_USER="${VAGRANT_CLOUD_USER:-chaifeng}"
 VAGRANT_VAGRANTFILE="Vagrantfile-bento"
 
 DOCKER_VERSION="${DOCKER_VERSION:-18.06}"
-BENTO_UBUNTU="${BENTO_UBUNTU:-ubuntu-18.04}"
-BENTO_UBUNTU_VERSION="${BENTO_UBUNTU_VERSION:-201812.27.0}"
+BENTO_BOX="${BENTO_BOX:-ubuntu-18.04}"
+BENTO_BOX_VERSION="${BENTO_BOX_VERSION:-201812.27.0}"
 
 VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
 
-export DOCKER_VERSION BENTO_UBUNTU_VERSION BENTO_UBUNTU VAGRANT_VAGRANTFILE
+export DOCKER_VERSION BENTO_BOX_VERSION BENTO_BOX VAGRANT_VAGRANTFILE
 
-boxname="${BENTO_UBUNTU}-docker-$DOCKER_VERSION"
-boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_UBUNTU_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
+boxname="${BENTO_BOX}-docker-$DOCKER_VERSION"
+boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
 
 gitrepo="$(git remote get-url origin)"
 gitrepo="${gitrepo#git@github.com:}"
@@ -71,7 +71,7 @@ if [[ ! -f "$boxfile" ]]; then
 		mv "$boxfile_repack" "$boxfile"
   fi
 else
-  echo "Box ${boxname} v$BENTO_UBUNTU_VERSION is already created."
+  echo "Box ${boxname} v$BENTO_BOX_VERSION is already created."
 fi
 
 [[ -n "${VAGRANT_BENTO_BUILD_ONLY:-}" ]] && exit
@@ -87,7 +87,7 @@ curl \
               , \"name\": \"${boxname}\" \
               , \"is_private\": false \
               , \"short_description\": \
-                   \"Ubuntu ${BENTO_UBUNTU#ubuntu-} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_UBUNTU}. Repo: https://github.com/${gitrepo}\" \
+                   \"${BENTO_BOX^} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_BOX}. Repo: https://github.com/${gitrepo}\" \
               } \
           }"
 
@@ -97,21 +97,21 @@ curl \
     --header "Content-Type: application/json" \
     --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
     "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/versions" \
-    --data "{ \"version\": { \"version\": \"$BENTO_UBUNTU_VERSION\", \"description\": \"Repo: [${gitrepo}](https://github.com/${gitrepo})\" } }"
+    --data "{ \"version\": { \"version\": \"$BENTO_BOX_VERSION\", \"description\": \"Repo: [${gitrepo}](https://github.com/${gitrepo})\" } }"
 
 echo ""
 echo "Create a new provider"
 curl \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_UBUNTU_VERSION/providers" \
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/providers" \
   --data "{ \"provider\": { \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\" } }"
 
 echo ""
 echo "Check if it is already uploaded"
 download_url="$(curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/${BENTO_UBUNTU_VERSION}" \
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/${BENTO_BOX_VERSION}" \
   | jq -r ".providers[] | if .name == \"${VAGRANT_DEFAULT_PROVIDER}\" then .download_url else empty end")"
 if curl -LI --fail "${download_url}"; then
   echo "$boxname is already uploaded."
@@ -122,7 +122,7 @@ echo ""
 echo "Prepare the provider for upload/get an upload URL"
 response="$(curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_UBUNTU_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/upload")"
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/upload")"
 
 echo "Extract the upload URL from the response"
 upload_path="$(echo "$response" | jq -r .upload_path)"
@@ -137,6 +137,6 @@ fi
 echo "Release the version"
 curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_UBUNTU_VERSION/release" \
+  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/release" \
   --request PUT
 

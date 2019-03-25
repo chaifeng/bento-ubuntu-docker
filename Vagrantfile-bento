@@ -2,10 +2,10 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-  config.vm.box = "bento/#{ENV['BENTO_UBUNTU']}"
-  config.vm.box_version = ENV['BENTO_UBUNTU_VERSION']
+  config.vm.box = "bento/#{ENV['BENTO_BOX']}"
+  config.vm.box_version = ENV['BENTO_BOX_VERSION']
 
-  bento_os_name = ENV['BENTO_UBUNTU'] && ENV['BENTO_UBUNTU'].split('-')[0] || 'ubuntu'
+  bento_os_name = ENV['BENTO_BOX'] && ENV['BENTO_BOX'].split('-')[0] || 'ubuntu'
 
   config.vm.provision 'docker', type: 'shell', inline: <<-SHELL
     set -eu -o pipefail
