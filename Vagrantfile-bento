@@ -32,9 +32,9 @@ Vagrant.configure("2") do |config|
   SHELL
 
   config.vm.provision 'cleanup', type: 'shell', # run: "never",
-    path: "https://github.com/chef/bento/raw/master/#{bento_os_name}/scripts/cleanup.sh"
+    path: "https://github.com/chef/bento/raw/master/packer_templates/#{bento_os_name}/scripts/cleanup.sh"
 
   config.vm.provision 'minimize', type: 'shell', 
-    path: 'https://github.com/chef/bento/raw/master/_common/minimize.sh',
+    path: 'https://github.com/chef/bento/raw/master/packer_templates/_common/minimize.sh',
     env: {'PACKER_BUILDER_TYPE': 'vagrant'}
 end
