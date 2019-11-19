@@ -23,8 +23,8 @@ Vagrant.configure("2") do |config|
     apt-key fingerprint 0EBFCD88
     add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/"${release_name}" $(lsb_release -cs) stable"
     apt-get update
-    apt-get install -y "docker-ce=${DOCKER_VERSION}.*" ||
-      apt-get install -y "docker-ce=5:${DOCKER_VERSION}.*"
+    apt-get install -y "docker-ce=${DOCKER_VERSION}*" ||
+      apt-get install -y "docker-ce=5:${DOCKER_VERSION}*"
     unset http_proxy https_proxy no_proxy
     docker info
 
