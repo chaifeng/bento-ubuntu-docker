@@ -1,15 +1,24 @@
 #!/usr/bin/env bash
 set -xe
 
-export DOCKER_VERSION=19.03
-export BENTO_BOX_VERSION="201906.18.0"
+if [[ "$(uname -m)" = arm64 ]]; then
+    VAGRANT_DEFAULT_PROVIDER=parallels BENTO_BOX_VERSION=202112.19.0 BENTO_BOX=ubuntu-20.04 bash -x ./build-box.sh
+    exit
+fi
 
-DOCKER_VERSION=19.03.3 BENTO_BOX=ubuntu-18.04 bash -x ./build-box.sh
-DOCKER_VERSION=19.03.5 BENTO_BOX=ubuntu-18.04 bash -x ./build-box.sh
+export DOCKER_VERSION=19.03.13
 
-BENTO_BOX=debian-9.6 BENTO_BOX_VERSION="201812.27.0" bash -x ./build-box.sh
-BENTO_BOX=debian-9.8 BENTO_BOX_VERSION="201906.17.0" bash -x ./build-box.sh
-BENTO_BOX=debian-10 BENTO_BOX_VERSION="201907.07.0" bash -x ./build-box.sh
+declare -a providers=(
+  parallels
+  #virtualbox
+  #vmware_desktop
+)
+for provider in "${providers[@]}"; do
+  #VAGRANT_DEFAULT_PROVIDER=$provider BENTO_BOX_VERSION="202103.19.0" BENTO_BOX=ubuntu-21.04 DOCKER_VERSION=20.10.2 bash -x ./build-box.sh
+  VAGRANT_DEFAULT_PROVIDER=$provider BENTO_BOX_VERSION="202012.23.0" BENTO_BOX=ubuntu-20.04 bash -x ./build-box.sh
+  VAGRANT_DEFAULT_PROVIDER=$provider BENTO_BOX_VERSION="202012.21.0" BENTO_BOX=ubuntu-18.04 bash -x ./build-box.sh
 
-BENTO_BOX=ubuntu-18.04 bash -x ./build-box.sh
-BENTO_BOX=ubuntu-16.04 bash -x ./build-box.sh
+  VAGRANT_DEFAULT_PROVIDER=$provider BENTO_BOX_VERSION="202102.02.0" BENTO_BOX=debian-9 bash -x ./build-box.sh
+  VAGRANT_DEFAULT_PROVIDER=$provider BENTO_BOX_VERSION="202102.10.0" BENTO_BOX=debian-10 bash -x ./build-box.sh
+done
+
