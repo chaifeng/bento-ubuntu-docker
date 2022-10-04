@@ -83,6 +83,7 @@ fi
 
 echo ""
 echo "Create a new box."
+bento_box_desc="${BENTO_BOX//-/ }"
 curl \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
@@ -92,7 +93,7 @@ curl \
               , \"name\": \"${boxname}\" \
               , \"is_private\": false \
               , \"short_description\": \
-                   \"${BENTO_BOX^} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_BOX}. Repo: https://github.com/${gitrepo}\" \
+                   \"${bento_box_desc^} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_BOX}. Repo: https://github.com/${gitrepo}\" \
               } \
           }"
 
