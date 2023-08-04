@@ -2,7 +2,7 @@
 set -xe
 
 if [[ "$(uname -m)" = arm64 ]]; then
-    VAGRANT_DEFAULT_PROVIDER=parallels BENTO_BOX_VERSION=202112.19.0 BENTO_BOX=ubuntu-20.04 bash -x ./build-box.sh
+    DOCKER_VERSION=24.0.5 VAGRANT_DEFAULT_PROVIDER=parallels BENTO_BOX=ubuntu-22.04 BENTO_BOX_VERSION=202306.28.0 bash -x ./build-box.sh
     exit
 fi
 
