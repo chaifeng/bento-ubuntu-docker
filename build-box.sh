@@ -11,19 +11,22 @@ VAGRANT_VAGRANTFILE="Vagrantfile-bento"
 
 DOCKER_VERSION="${DOCKER_VERSION:-20.10.17}"
 BENTO_BOX="${BENTO_BOX:-ubuntu-20.04}"
-BOX_ARCH=""
-if [[ "$(uname -m)" = arm64 ]]; then
-    BOX_ARCH="-arm64"
-fi
 BENTO_BOX_VERSION="${BENTO_BOX_VERSION:-202112.19.0}"
 
 VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
 
 export DOCKER_VERSION BENTO_BOX_VERSION BENTO_BOX VAGRANT_VAGRANTFILE
 
-boxname="${BENTO_BOX}-docker-$DOCKER_VERSION${BOX_ARCH}"
-boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
-BENTO_BOX+="${BOX_ARCH}"
+if [[ "$BENTO_BOX" = *-arm64 ]]; then
+  BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-arm64}"
+  boxname="${BENTO_BOX%-arm64}-docker-$DOCKER_VERSION-arm64"
+  boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
+else
+  BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-amd64}"
+  boxname="${BENTO_BOX}-docker-$DOCKER_VERSION"
+  boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-${BENTO_BOX_ARCHITECTURE}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
+fi
+
 
 gitrepo="$(git remote get-url origin)"
 gitrepo="${gitrepo#git@github.com:}"
@@ -76,18 +79,19 @@ if [[ ! -f "$boxfile" ]]; then
 		mv "$boxfile_repack" "$boxfile"
   fi
 else
-  echo "Box ${boxname} v$BENTO_BOX_VERSION is already created."
+  echo "Box ${boxname} ($BENTO_BOX_ARCHITECTURE) v$BENTO_BOX_VERSION has been already created."
 fi
 
 [[ -n "${VAGRANT_BENTO_BUILD_ONLY:-}" ]] && exit
 
+# https://developer.hashicorp.com/vagrant/vagrant-cloud/api/v2
 echo ""
 echo "Create a new box."
 bento_box_desc="${BENTO_BOX//-/ }"
 curl \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/boxes" \
+  "https://app.vagrantup.com/api/v2/boxes" \
   --data "{ \"box\": { \
               \"username\": \"${VAGRANT_CLOUD_USER}\" \
               , \"name\": \"${boxname}\" \
@@ -102,33 +106,35 @@ echo "Create a new version"
 curl \
     --header "Content-Type: application/json" \
     --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-    "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/versions" \
+    "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/versions" \
     --data "{ \"version\": { \"version\": \"$BENTO_BOX_VERSION\", \"description\": \"Repo: [${gitrepo}](https://github.com/${gitrepo})\" } }"
 
 echo ""
-echo "Create a new provider"
+echo "Create a new provider($BENTO_BOX_ARCHITECTURE)"
 curl \
   --header "Content-Type: application/json" \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/providers" \
-  --data "{ \"provider\": { \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\" } }"
+  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/providers" \
+  --data "{ \"provider\": { \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\", \"architecture\": \"${BENTO_BOX_ARCHITECTURE}\" } }"
 
 echo ""
-echo "Check if it is already uploaded"
+echo "Check if it is already uploaded($BENTO_BOX_ARCHITECTURE)"
 download_url="$(curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/${BENTO_BOX_VERSION}" \
-  | jq -r ".providers[] | if .name == \"${VAGRANT_DEFAULT_PROVIDER}\" then .download_url else empty end")"
-if curl -LI --fail "${download_url}"; then
-  echo "$boxname is already uploaded."
+  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/${BENTO_BOX_VERSION}" \
+  | jq -r --arg p "${VAGRANT_DEFAULT_PROVIDER}" --arg a "${BENTO_BOX_ARCHITECTURE}" \
+       '.providers[] | select(.name == $p and .architecture == $a) | .download_url // ""'
+)"
+if [[ -n "$download_url" ]] && curl -LI --fail "${download_url}"; then
+    echo "$boxname ($BENTO_BOX_ARCHITECTURE) has been uploaded."
   exit 0
 fi
 
 echo ""
-echo "Prepare the provider for upload/get an upload URL"
+echo "Prepare the provider for upload/get an upload URL($BENTO_BOX_ARCHITECTURE)"
 response="$(curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/upload")"
+  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/${BENTO_BOX_ARCHITECTURE}/upload")"
 
 echo "Extract the upload URL from the response"
 upload_path="$(echo "$response" | jq -r .upload_path)"
@@ -143,6 +149,6 @@ fi
 echo "Release the version"
 curl \
   --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v1/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/release" \
+  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/release" \
   --request PUT
 
