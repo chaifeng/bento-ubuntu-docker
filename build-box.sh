@@ -17,15 +17,9 @@ VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
 
 export DOCKER_VERSION BENTO_BOX_VERSION BENTO_BOX VAGRANT_VAGRANTFILE
 
-if [[ "$BENTO_BOX" = *-arm64 ]]; then
-  BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-arm64}"
-  boxname="${BENTO_BOX%-arm64}-docker-$DOCKER_VERSION-arm64"
-  boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
-else
-  BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-amd64}"
-  boxname="${BENTO_BOX}-docker-$DOCKER_VERSION"
-  boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-${BENTO_BOX_ARCHITECTURE}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
-fi
+BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-amd64}"
+boxname="${BENTO_BOX}-docker-$DOCKER_VERSION"
+boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-${BENTO_BOX_ARCHITECTURE}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
 
 
 gitrepo="$(git remote get-url origin)"
@@ -38,6 +32,20 @@ if [[ "$VAGRANT_DEFAULT_PROVIDER" = vmware_* ]]; then
   is_vmware_provider=true
 else
   is_vmware_provider=false
+fi
+
+hcp_api_base_url="https://api.cloud.hashicorp.com/vagrant/2022-09-30"
+hcp_api() {
+    local url="$( sed -e "s|{registry}|${VAGRANT_CLOUD_USER}|" -e "s|{box}|${boxname}|" -e "s|{version}|${BENTO_BOX_VERSION}|" -e "s|{provider}|${VAGRANT_DEFAULT_PROVIDER}|" -e "s|{architecture}|${BENTO_BOX_ARCHITECTURE}|" <<< "$1" )"
+    declare -a curl_headers=(--header "Content-Type: application/json")
+    [[ -z "${HCP_ACCESS_TOKEN-}" ]] || curl_headers+=( --header "Authorization: Bearer $HCP_ACCESS_TOKEN" )
+    curl -Ls "${curl_headers[@]}" "$url" "${@:2}" | tee /dev/stderr
+}
+
+if [[ -n "$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}" | jq -r '.architecture.box_data.size // ""')" ]]; then
+    echo "Box '${VAGRANT_CLOUD_USER}/${boxname} v${BENTO_BOX_VERSION} ${VAGRANT_DEFAULT_PROVIDER} ${BENTO_BOX_ARCHITECTURE}' has been uploaded."
+    echo "Do nothing and quit."
+    exit
 fi
 
 if [[ ! -f "$boxfile" ]]; then
@@ -110,12 +118,7 @@ if [[ -z "${HCP_ACCESS_TOKEN:-}" ]]; then
     exit 1
 fi >&2
 
-hcp_api_base_url="https://api.cloud.hashicorp.com/vagrant/2022-09-30"
-hcp_api() {
-    local url="$( sed -e "s|{registry}|${VAGRANT_CLOUD_USER}|" -e "s|{box}|${boxname}|" -e "s|{version}|${BENTO_BOX_VERSION}|" -e "s|{provider}|${VAGRANT_DEFAULT_PROVIDER}|" -e "s|{architecture}|${BENTO_BOX_ARCHITECTURE}|" <<< "$1" )"
-    curl -Ls --header "Content-Type: application/json" --header "Authorization: Bearer $HCP_ACCESS_TOKEN" "$url" "${@:2}" | tee /dev/stderr
-}
-
+banner "Obtain box '${VAGRANT_CLOUD_USER}/${boxname} v${BENTO_BOX_VERSION} ${VAGRANT_DEFAULT_PROVIDER} ${BENTO_BOX_ARCHITECTURE}' information"
 box_info="$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}?expanded=true")"
 : <<\EOF
 {
