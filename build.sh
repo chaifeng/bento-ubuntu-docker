@@ -1,63 +1,61 @@
-#!/usr/bin/env bash
-set -xe
+#!/usr/bin/env zsh
+set -e
+setopt extendedglob
 
 declare -A bento_box_versions
-bento_box_versions[ubuntu-24.04-arm64]=-
-bento_box_versions[ubuntu-23.04-arm64]=202306.28.0
-bento_box_versions[ubuntu-22.10-arm64]=202306.30.0
-bento_box_versions[ubuntu-22.04-arm64]=202306.30.0
-bento_box_versions[debian-12-arm64]=202306.13.0
-bento_box_versions[debian-11-arm64]=202306.28.0
-bento_box_versions[debian-10-arm64]=202306.28.0
 
-bento_box_versions[ubuntu-24.04]=202404.26.0
-bento_box_versions[ubuntu-23.04]=202304.25.0
-bento_box_versions[ubuntu-22.10]=202304.25.0
-bento_box_versions[ubuntu-22.04]=202304.25.0
-bento_box_versions[debian-12]=202306.13.0
-bento_box_versions[debian-11]=202303.13.0
-bento_box_versions[debian-10]=202304.28.0
-
+source <(
+    for boxname in ubuntu-24.04 debian-12; do
+        curl -s --header "Content-Type: application/json" "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/bento/box/${boxname}?expanded=true" |
+            jq -r '
+                .box as $box |
+                [ $box.versions[] as $version |
+                  $version.providers[] as $provider |
+                  $provider.architectures[] |
+                  {
+                    key: "\($box.name):\($provider.name):\(.architecture_type | if . == "unknown" then "amd64" else . end)",
+                    version: $version.name
+                  }
+                ] |
+                group_by(.key) |
+                map(max_by(.version)) |
+                .[] |
+                "bento_box_versions[\(.key)]=\"\(.version)\""
+            '
+    done | tee /dev/stderr
+)
+# bento_box_versions[debian-12:parallels:amd64]="202407.22.0"
+# bento_box_versions[debian-12:parallels:arm64]="202407.22.0"
+# bento_box_versions[debian-12:virtualbox:amd64]="202407.22.0"
+# bento_box_versions[debian-12:vmware_desktop:amd64]="202407.22.0"
+# bento_box_versions[debian-12:vmware_desktop:arm64]="202407.22.0"
 
 if [[ "$(uname -m)" = arm64 ]]; then
     BENTO_BOX_ARCHITECTURE="arm64"
-    bento_box_name_suffix="-arm64"
-    declare -a providers=(parallels)
 else
     BENTO_BOX_ARCHITECTURE="amd64"
-    bento_box_name_suffix=""
-    declare -a providers=(
-        virtualbox
-        vmware_desktop
-        parallels
-    )
-
 fi
 
-declare -a docker_versions=(
-    "26.1.1"
-    #"24.0.5"
-)
+declare -a docker_versions=(27.3.1 26.1.1)
 
-declare -a bento_boxes=(
-    "ubuntu-24.04"
-    #"ubuntu-22.04"
-    #"debian-12"
-    #"debian-11"
-)
+for docker_version in "${docker_versions[@]}"; do
+    for bento_box in "${(@k)bento_box_versions}"; do
+        version="${bento_box_versions[$bento_box]}"
+        box="${bento_box%%:*}"
+        architecture="${bento_box##*:}"
+        provider="${bento_box#*:}"
+        provider="${provider%:*}"
+        [[ "$architecture" == "$BENTO_BOX_ARCHITECTURE" ]] || continue
+        if [[ "$provider" = parallels ]]; then
+            command -v prlctl
+        elif [[ "$provider" = vmware_* ]]; then
+            command -v vmnet-cli
+        elif [[ "$provider" = virtualbox ]]; then
+            command -v VBoxHeadless
+        else
+            false
+        fi >/dev/null || continue
 
-for provider in "${providers[@]}"; do
-  for docker_version in "${docker_versions[@]}"; do
-    for bento_box in "${bento_boxes[@]}"; do
-      if [[ -n "$bento_box_name_suffix" && "${bento_box_versions[${bento_box}${bento_box_name_suffix}]:?undefined box version}" = - ]]; then
-          BENTO_BOX="$bento_box"
-          BENTO_BOX_VERSION="${bento_box_versions[${bento_box}]:?undefined box version}"
-      else
-        BENTO_BOX="$bento_box${bento_box_name_suffix}"
-        BENTO_BOX_VERSION="${bento_box_versions[${bento_box}${bento_box_name_suffix}]:?undefined box version}"
-      fi
-      VAGRANT_DEFAULT_PROVIDER="$provider" BENTO_BOX="${BENTO_BOX}" BENTO_BOX_VERSION="${BENTO_BOX_VERSION}" DOCKER_VERSION="${docker_version}" BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE}" bash -x ./build-box.sh
+        echo VAGRANT_DEFAULT_PROVIDER="$provider" BENTO_BOX="${box}" BENTO_BOX_VERSION="${version}" DOCKER_VERSION="${docker_version}" BENTO_BOX_ARCHITECTURE="${architecture}" zsh ./build-box.sh | tee /dev/stderr | zsh
     done
-  done
 done
-

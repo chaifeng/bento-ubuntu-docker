@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -eu -o pipefail
 
-if [[ "$-" = *x* ]]; then
-  exec 99>>"${BASH_SOURCE%%.sh}.log"
-  BASH_XTRACEFD=99
+if [[ -z "$ZSH_VERSION" ]]; then
+    echo "This script must be run with Zsh." >&2
+    exit 1
 fi
 
 VAGRANT_CLOUD_USER="${VAGRANT_CLOUD_USER:-chaifeng}"
@@ -30,6 +30,7 @@ fi
 
 gitrepo="$(git remote get-url origin)"
 gitrepo="${gitrepo#git@github.com:}"
+gitrepo="${gitrepo#https://github.com/}"
 gitrepo="${gitrepo%.git}"
 
 
@@ -84,71 +85,131 @@ fi
 
 [[ -n "${VAGRANT_BENTO_BUILD_ONLY:-}" ]] && exit
 
-# https://developer.hashicorp.com/vagrant/vagrant-cloud/api/v2
-echo ""
-echo "Create a new box."
-bento_box_desc="${BENTO_BOX//-/ }"
-curl \
-  --header "Content-Type: application/json" \
-  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v2/boxes" \
-  --data "{ \"box\": { \
-              \"username\": \"${VAGRANT_CLOUD_USER}\" \
-              , \"name\": \"${boxname}\" \
-              , \"is_private\": false \
-              , \"short_description\": \
-                   \"${bento_box_desc^} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_BOX}. Repo: https://github.com/${gitrepo}\" \
-              } \
-          }"
+function banner() {
+    echo ""
+    echo "$@"
+} >&2
 
-echo ""
-echo "Create a new version"
-curl \
-    --header "Content-Type: application/json" \
-    --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-    "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/versions" \
-    --data "{ \"version\": { \"version\": \"$BENTO_BOX_VERSION\", \"description\": \"Repo: [${gitrepo}](https://github.com/${gitrepo})\" } }"
+if ! hash jq &>/dev/null; then
+    echo Require jq command.
+    exit 1
+fi >&2
 
-echo ""
-echo "Create a new provider($BENTO_BOX_ARCHITECTURE)"
-curl \
-  --header "Content-Type: application/json" \
-  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/providers" \
-  --data "{ \"provider\": { \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\", \"architecture\": \"${BENTO_BOX_ARCHITECTURE}\" } }"
-
-echo ""
-echo "Check if it is already uploaded($BENTO_BOX_ARCHITECTURE)"
-download_url="$(curl \
-  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/${BENTO_BOX_VERSION}" \
-  | jq -r --arg p "${VAGRANT_DEFAULT_PROVIDER}" --arg a "${BENTO_BOX_ARCHITECTURE}" \
-       '.providers[] | select(.name == $p and .architecture == $a) | .download_url // ""'
+banner "Create a access token"
+[[ -n "${HCP_ACCESS_TOKEN:-}" ]] || HCP_ACCESS_TOKEN="$(curl -Ls --location "https://auth.idp.hashicorp.com/oauth2/token" \
+     --header "Content-Type: application/x-www-form-urlencoded" \
+     --data-urlencode "client_id=${HCP_CLIENT_ID:?missing client ID}" \
+     --data-urlencode "client_secret=${HCP_CLIENT_SECRET:?missing client secret}" \
+     --data-urlencode "grant_type=client_credentials" \
+     --data-urlencode "audience=https://api.hashicorp.cloud" |
+    jq -r .access_token
 )"
-if [[ -n "$download_url" ]] && curl -LI --fail "${download_url}"; then
+
+if [[ -z "${HCP_ACCESS_TOKEN:-}" ]]; then
+    echo "Failed to create a access token."
+    exit 1
+fi >&2
+
+hcp_api_base_url="https://api.cloud.hashicorp.com/vagrant/2022-09-30"
+hcp_api() {
+    local url="$( sed -e "s|{registry}|${VAGRANT_CLOUD_USER}|" -e "s|{box}|${boxname}|" -e "s|{version}|${BENTO_BOX_VERSION}|" -e "s|{provider}|${VAGRANT_DEFAULT_PROVIDER}|" -e "s|{architecture}|${BENTO_BOX_ARCHITECTURE}|" <<< "$1" )"
+    curl -Ls --header "Content-Type: application/json" --header "Authorization: Bearer $HCP_ACCESS_TOKEN" "$url" "${@:2}" | tee /dev/stderr
+}
+
+box_info="$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}?expanded=true")"
+: <<\EOF
+{
+  "box": {
+    "name": "ubuntu-16.04-docker-18.03",
+    "downloads": "1081",
+    "versions": [
+      {
+        "name": "201812.27.0",
+        "providers": [
+          {
+            "name": "vmware_fusion",
+            "architectures": [
+              {
+                "architecture_type": "unknown",
+                },
+              }
+            ],
+          },
+          {
+            "name": "virtualbox",
+            "architectures": [
+              {
+                "architecture_type": "unknown",
+              }
+            ],
+          }
+        ]
+      },
+    ]
+  }
+}
+EOF
+
+declare -a jq_opts=(-r --arg registry "${VAGRANT_CLOUD_USER}" --arg box "${boxname}" --arg version "${BENTO_BOX_VERSION}" --arg provider "${VAGRANT_DEFAULT_PROVIDER}" --arg architecture "${BENTO_BOX_ARCHITECTURE}")
+
+# jq "${jq_opts[@]}" '.box.versions[] | select(.name == $version) | .providers[] | select(.name == $provider) | .architectures[] | select(.architecture_type == $architecture) | .architecture_type // ""'
+
+if [[ "$(<<<"$box_info" jq "${jq_opts[@]}" '.box.name // ""')" != "$boxname" ]]; then
+    banner "Box ${boxname}"
+    bento_box_desc="${BENTO_BOX//-/ }"
+    hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/boxes" \
+            --data "{ \"name\": \"${boxname}\", \
+            \"is_private\": false, \
+            \"short_description\": \
+               \"${(C)bento_box_desc} with Docker CE ${DOCKER_VERSION}, based on Bento/${BENTO_BOX}. Repo: https://github.com/${gitrepo}\" \
+          }"
+fi
+
+if [[ "$(<<<"$box_info" jq "${jq_opts[@]}" '.box.versions[] | select(.name == $version) | .name // ""')" != "$BENTO_BOX_VERSION" ]]; then
+    banner "Version $BENTO_BOX_VERSION"
+    hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/versions" \
+            --data "{ \"name\": \"$BENTO_BOX_VERSION\", \"description\": \"Repo: [${gitrepo}](https://github.com/${gitrepo})\" }"
+fi
+
+if [[ "$(<<<"$box_info" jq "${jq_opts[@]}" '.box.versions[] | select(.name == $version) | .providers[] | select(.name == $provider) | .name // ""')" != "$VAGRANT_DEFAULT_PROVIDER" ]]; then
+    banner "Provider $VAGRANT_DEFAULT_PROVIDER"
+    hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/providers" \
+            --data "{ \"name\": \"${VAGRANT_DEFAULT_PROVIDER}\"}'"
+    # {"provider":{"name":"virtualbox", "architectures":[], "created_at":"2024-11-08T23:49:50.269676019Z", "updated_at":"2024-11-08T23:49:50.269676019Z", "summary":{"architectures_count":"0", "architecture_types":[]}}}
+    # {"code":6, "message":"provider \"virtualbox\" already exists for this version", "details":[]}
+fi
+
+if [[ "$(<<<"$box_info" jq "${jq_opts[@]}" '.box.versions[] | select(.name == $version) | .providers[] | select(.name == $provider) | .architectures[] | select(.architecture_type == $architecture) | .architecture_type // ""')" != "$BENTO_BOX_ARCHITECTURE" ]]; then
+    banner "Architecture $BENTO_BOX_ARCHITECTURE"
+    hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architectures" \
+            --data "{ \"architecture_type\": \"${BENTO_BOX_ARCHITECTURE}\" }"
+    # {"architecture":{"architecture_type":"amd64", "default":true, "box_data":{"download_url":null, "checksum":"", "checksum_type":"NONE", "size":null, "created_at":"2024-11-08T23:54:33.402608625Z", "updated_at":"2024-11-08T23:54:33.402608625Z"}, "created_at":"2024-11-08T23:54:33.401026216Z", "updated_at":"2024-11-08T23:54:33.401026216Z"}}
+    # {"code":6, "message":"architecture with type \"amd64\" already exists", "details":[]}
+fi
+banner "Check if it is already uploaded($BENTO_BOX_ARCHITECTURE)"
+download_url="$(
+  hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}/download" |
+    jq -r '.url // ""'
+)"
+if [[ -n "${download_url-}" && "$download_url" != null ]] && curl -LIs --fail "${download_url}"; then
     echo "$boxname ($BENTO_BOX_ARCHITECTURE) has been uploaded."
   exit 0
 fi
 
-echo ""
-echo "Prepare the provider for upload/get an upload URL($BENTO_BOX_ARCHITECTURE)"
-response="$(curl \
-  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/provider/${VAGRANT_DEFAULT_PROVIDER}/${BENTO_BOX_ARCHITECTURE}/upload")"
+banner "Prepare the provider for upload/get an upload URL($BENTO_BOX_ARCHITECTURE)"
+response="$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}/upload")"
+# {"url":"https://api.cloud.hashicorp.com/vagrant-archivist/v1/object/eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJrZXkiOiJjaGFpZmVuZy91YnVudHUtMjIuMDQtZG9ja2VyLTI2LjEuMS8yMDI0MDcuMjMuMC92aXJ0dWFsYm94L2YwNjM0NTIwLTllMmQtMTFlZi05YWM5LTdhOGZjMDYyZWE0YyIsIm1vZGUiOiJ3IiwiZXhwaXJlIjoxNzMxMTExMTYxLCJjYWxsYmFjayI6Imh0dHBzOi8vYXBpLmhhc2hpY29ycC5jbG91ZC92YWdyYW50LzIwMjItMDktMzAvcmVnaXN0cnkvY2hhaWZlbmcvYm94L3VidW50dS0yMi4wNC1kb2NrZXItMjYuMS4xL3ZlcnNpb24vMjAyNDA3LjIzLjAvcHJvdmlkZXIvdmlydHVhbGJveC9hcmNoaXRlY3R1cmUvYW1kNjQvY29tcGxldGUifQ.tf_io7BEI0EaPx-BVhG4Ui662PfX-mz7u9DF3bwkZ0I"}
 
-echo "Extract the upload URL from the response"
-upload_path="$(echo "$response" | jq -r .upload_path)"
+upload_path="$(echo "$response" | jq -r .url)"
 
-echo "Perform the upload"
+banner "Uploading $boxfile"
 if type pv; then
-  pv "$boxfile" | curl "$upload_path" --request PUT --silent --upload-file -
+  pv "$boxfile" | curl -Ls "$upload_path" --request PUT --silent --upload-file -
 else
-  curl "$upload_path" --request PUT --upload-file "$boxfile" --progress-bar
+  curl -Ls "$upload_path" --request PUT --upload-file "$boxfile" --progress-bar
 fi
 
-echo "Release the version"
-curl \
-  --header "Authorization: Bearer $VAGRANT_CLOUD_TOKEN" \
-  "https://app.vagrantup.com/api/v2/box/${VAGRANT_CLOUD_USER}/${boxname}/version/$BENTO_BOX_VERSION/release" \
+echo "Release ${VAGRANT_CLOUD_USER}/${boxname} v$BENTO_BOX_VERSION"
+hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/release" \
   --request PUT
 
