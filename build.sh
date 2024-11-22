@@ -56,6 +56,6 @@ for docker_version in "${docker_versions[@]}"; do
             false
         fi >/dev/null || continue
 
-        echo VAGRANT_DEFAULT_PROVIDER="$provider" BENTO_BOX="${box}" BENTO_BOX_VERSION="${version}" DOCKER_VERSION="${docker_version}" BENTO_BOX_ARCHITECTURE="${architecture}" zsh ./build-box.sh | tee /dev/stderr | zsh
+        echo BENTO_BOX="${box}" DOCKER_VERSION="${docker_version}" BENTO_BOX_VERSION="${version}" VAGRANT_DEFAULT_PROVIDER="$provider" BENTO_BOX_ARCHITECTURE="${architecture}" zsh ./build-box.sh | tee /dev/stderr | zsh
     done
 done

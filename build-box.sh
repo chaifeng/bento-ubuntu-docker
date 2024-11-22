@@ -9,18 +9,17 @@ fi
 VAGRANT_CLOUD_USER="${VAGRANT_CLOUD_USER:-chaifeng}"
 VAGRANT_VAGRANTFILE="Vagrantfile-bento"
 
-DOCKER_VERSION="${DOCKER_VERSION:-20.10.17}"
-BENTO_BOX="${BENTO_BOX:-ubuntu-20.04}"
-BENTO_BOX_VERSION="${BENTO_BOX_VERSION:-202112.19.0}"
+DOCKER_VERSION="${DOCKER_VERSION:-27.3.1}"
+BENTO_BOX="${BENTO_BOX:-ubuntu-24.04}"
+BENTO_BOX_VERSION="${BENTO_BOX_VERSION:-202407.22.0}"
 
-VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-virtualbox}"
-
+VAGRANT_DEFAULT_PROVIDER="${VAGRANT_DEFAULT_PROVIDER:-parallels}"
 export DOCKER_VERSION BENTO_BOX_VERSION BENTO_BOX VAGRANT_VAGRANTFILE
 
 BENTO_BOX_ARCHITECTURE="${BENTO_BOX_ARCHITECTURE:-amd64}"
 boxname="${BENTO_BOX}-docker-$DOCKER_VERSION"
-boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-${BENTO_BOX_ARCHITECTURE}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}.box"
-
+boxfile="${VAGRANT_CLOUD_USER}-bento-${boxname}-v${BENTO_BOX_VERSION}-${VAGRANT_DEFAULT_PROVIDER}-${BENTO_BOX_ARCHITECTURE}.box"
+boxurl="https://portal.cloud.hashicorp.com/vagrant/discover/${VAGRANT_CLOUD_USER}/${boxname}/versions/${BENTO_BOX_VERSION}"
 
 gitrepo="$(git remote get-url origin)"
 gitrepo="${gitrepo#git@github.com:}"
@@ -35,16 +34,43 @@ else
 fi
 
 hcp_api_base_url="https://api.cloud.hashicorp.com/vagrant/2022-09-30"
+hcp_generate_access_token() {
+    HCP_ACCESS_TOKEN="$(curl -Ls --location "https://auth.idp.hashicorp.com/oauth2/token" \
+         --header "Content-Type: application/x-www-form-urlencoded" \
+         --data-urlencode "client_id=${HCP_CLIENT_ID:?missing client ID}" \
+         --data-urlencode "client_secret=${HCP_CLIENT_SECRET:?missing client secret}" \
+         --data-urlencode "grant_type=client_credentials" \
+         --data-urlencode "audience=https://api.hashicorp.cloud" |
+        jq -r .access_token
+    )"
+}
 hcp_api() {
     local url="$( sed -e "s|{registry}|${VAGRANT_CLOUD_USER}|" -e "s|{box}|${boxname}|" -e "s|{version}|${BENTO_BOX_VERSION}|" -e "s|{provider}|${VAGRANT_DEFAULT_PROVIDER}|" -e "s|{architecture}|${BENTO_BOX_ARCHITECTURE}|" <<< "$1" )"
     declare -a curl_headers=(--header "Content-Type: application/json")
     [[ -z "${HCP_ACCESS_TOKEN-}" ]] || curl_headers+=( --header "Authorization: Bearer $HCP_ACCESS_TOKEN" )
-    curl -Ls "${curl_headers[@]}" "$url" "${@:2}" | tee /dev/stderr
+    local response code message
+    response="$(curl -Ls "${curl_headers[@]}" "$url" "${@:2}" | tee /dev/stderr; echo ''>&2)"
+    code="$(<<< "$response" jq -r '.code//0')"
+    [[ -n "$code" ]] || code=0
+    message="$(<<< "$response" jq -r '.message//""')"
+    [[ -z "${message-}" ]] ||
+        echo "${message}" >&2
+    if [[ "$code" -eq 16 && -z "${_run_again-}" ]]; then
+        hcp_generate_access_token
+        _run_again=true hcp_api "$@"
+    else
+        if ((code > 0 && code != 6)); then
+            exit "$code"
+        fi
+        echo "$response"
+    fi
 }
 
-if [[ -n "$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}" | jq -r '.architecture.box_data.size // ""')" ]]; then
+if [[ -n "$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}" | jq -r '.architecture.box_data.size // ""')" || -n "$(hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/${BENTO_BOX_VERSION%.?}.1/provider/{provider}/architecture/{architecture}" | jq -r '.architecture.box_data.size // ""')" ]]; then
     echo "Box '${VAGRANT_CLOUD_USER}/${boxname} v${BENTO_BOX_VERSION} ${VAGRANT_DEFAULT_PROVIDER} ${BENTO_BOX_ARCHITECTURE}' has been uploaded."
+    echo "URL: $boxurl"
     echo "Do nothing and quit."
+    echo ""
     exit
 fi
 
@@ -104,14 +130,7 @@ if ! hash jq &>/dev/null; then
 fi >&2
 
 banner "Create a access token"
-[[ -n "${HCP_ACCESS_TOKEN:-}" ]] || HCP_ACCESS_TOKEN="$(curl -Ls --location "https://auth.idp.hashicorp.com/oauth2/token" \
-     --header "Content-Type: application/x-www-form-urlencoded" \
-     --data-urlencode "client_id=${HCP_CLIENT_ID:?missing client ID}" \
-     --data-urlencode "client_secret=${HCP_CLIENT_SECRET:?missing client secret}" \
-     --data-urlencode "grant_type=client_credentials" \
-     --data-urlencode "audience=https://api.hashicorp.cloud" |
-    jq -r .access_token
-)"
+[[ -n "${HCP_ACCESS_TOKEN:-}" ]] || hcp_generate_access_token
 
 if [[ -z "${HCP_ACCESS_TOKEN:-}" ]]; then
     echo "Failed to create a access token."
@@ -193,7 +212,7 @@ banner "Check if it is already uploaded($BENTO_BOX_ARCHITECTURE)"
 download_url="$(
   hcp_api "https://api.cloud.hashicorp.com/vagrant/2022-09-30/registry/{registry}/box/{box}/version/{version}/provider/{provider}/architecture/{architecture}/download" |
     jq -r '.url // ""'
-)"
+)" || true
 if [[ -n "${download_url-}" && "$download_url" != null ]] && curl -LIs --fail "${download_url}"; then
     echo "$boxname ($BENTO_BOX_ARCHITECTURE) has been uploaded."
   exit 0
